@@ -10,6 +10,9 @@ from engine import profile
 
 PROVIDERS = {'Groq': 'https://api.groq.com/openai/v1', 'Grok (xAI)': 'https://api.x.ai/v1'}
 DEFAULT_MODELS = {'Groq': 'openai/gpt-oss-120b', 'Grok (xAI)': 'grok-4.3'}
+PLAN_TAB = 'План виправлень'
+APPROVE_PLAN_BUTTON = 'Підтверджую: застосувати цей план'
+REJECT_PLAN_BUTTON = 'Відхилити план'
 SYSTEM = '''Ти Data Analyst — уважний українськомовний аналітик якості даних.
 Це справжнє дослідження з Python-інструментами, не рольова гра.
 Спочатку виклич profile_table, потім перевіряй гіпотези через check_column,
@@ -28,8 +31,14 @@ drop_rows_where(value, column?). Це видалення рядка за точ�
 видалити всі рядки з UNKNOWN у будь-якій колонці, запропонуй операцію
 {"kind":"drop_rows_where","value":"UNKNOWN"}.
 Не вигадуй значення пропусків; погодь спосіб заповнення. Формат дат має бути явним.
-План лише створює preview. Ти НЕ можеш його затвердити. Попроси натиснути кнопку.
-Після повідомлення про затвердження повторно виклич profile_table та перевір
+Опис змін у чаті не створює план. План готовий лише коли pending_plan є в
+поточному стані або propose_plan успішно повернув ідентифікатор у цьому ході.
+Якщо плану немає, кнопок підтвердження й відхилення немає. Не проси їх натискати:
+підготуй план інструментом, якщо умови відомі, або постав потрібне запитання.
+Коли план є, поясни зміни. Застосунок сам покаже підказку з реальними кнопками
+в потрібній вкладці, тож не додавай закликів натискати кнопки у відповіді.
+Повідомлення «підтверджую» в чаті не застосовує план. Ти не можеш його затвердити.
+Після зареєстрованого застосування плану повторно виклич profile_table та перевір
 відповідні колонки. Поясни зміни, невирішені проблеми та межі висновків.
 За потреби використовуй aggregate для перевірки підсумків. Зразки обмежені,
 не поширюй висновок зі зразка на всю таблицю без числової перевірки.
@@ -85,10 +94,11 @@ def compact_history(messages, clinic):
     recent = clinic.audit[-1] if clinic.audit else None
     state = {'revision': clinic.revision, 'rows': len(clinic.df),
              'columns': list(clinic.df.columns), 'pending_plan': None,
-             'last_action': None}
+             'last_action': None, 'plan_controls': None}
     if clinic.pending:
         p = clinic.pending['preview']
         state['pending_plan'] = {k:p[k] for k in ('id','operations','explanation')}
+        state['plan_controls'] = {'tab': PLAN_TAB, 'approve': APPROVE_PLAN_BUTTON, 'reject': REJECT_PLAN_BUTTON}
     if recent:
         d = recent['details']
         state['last_action'] = {'action':recent['action'], 'revision':recent['revision'],
@@ -264,7 +274,7 @@ class Agent:
                     model_result = result
                     if name == 'propose_plan' and 'error' not in result:
                         model_result = {k: result[k] for k in ('id', 'revision', 'explanation', 'changed_rows', 'removed_rows')}
-                        model_result['status'] = 'Очікує підтвердження користувачем у вкладці План виправлень.'
+                        model_result['status'] = 'План підготовлено. Застосунок покаже підказку про підтвердження.'
                     text = json.dumps(model_result, ensure_ascii=False, default=str, separators=(',', ':'))
                     if len(text) > 9000:
                         text = json.dumps({'notice': 'Результат завеликий; звузьте запит. Нижче лише уривок.',

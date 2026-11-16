@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from agent import Agent, ProviderError
+from agent import APPROVE_PLAN_BUTTON, PLAN_TAB, REJECT_PLAN_BUTTON, Agent, ProviderError
 from engine import Clinic, export_csv, export_xlsx, load_table_auto, profile
 
 provider = 'Groq'
@@ -121,7 +121,7 @@ def talk(text):
     st.rerun()
 
 
-chat_tab, data_tab, plan_tab, log_tab = st.tabs(['Розмова з агентом','Таблиця й аналіз','План виправлень','Звіт та експорт'])
+chat_tab, data_tab, plan_tab, log_tab = st.tabs(['Розмова з агентом','Таблиця й аналіз',PLAN_TAB,'Звіт та експорт'])
 with chat_tab:
     st.subheader('Дослідження')
     if st.button('Почати діагностику'):
@@ -130,6 +130,9 @@ with chat_tab:
     for message in st.session_state.chat:
         with st.chat_message(message['role']):
             st.markdown(message['content'])
+    if clinic.pending:
+        st.info(f'План готовий. Відкрийте «{PLAN_TAB}», перегляньте зміни й натисніть '
+                f'«{APPROVE_PLAN_BUTTON}» або «{REJECT_PLAN_BUTTON}».')
     if st.session_state.get('diagnosis_started', False):
         prompt = st.chat_input('Поставте задачу або дайте відповідь агенту', max_chars=5000)
         if prompt:
@@ -166,10 +169,10 @@ with plan_tab:
             st.dataframe(pd.DataFrame(p['removed_sample']))
         with st.expander('Повна таблиця після змін'):
             st.dataframe(clinic.pending['candidate'], use_container_width=True)
-        if st.button('Підтверджую: застосувати цей план', type='primary'):
+        if st.button(APPROVE_PLAN_BUTTON, type='primary'):
             clinic.approve(p['id'])
             talk(f"Я затвердив(-ла) план {p['id']} кнопкою. Застосовано версію {clinic.revision}. Повторно перевір результат інструментами; вкажи невирішені проблеми.")
-        if st.button('Відхилити план'):
+        if st.button(REJECT_PLAN_BUTTON):
             clinic.reject()
             agent.messages.append({'role':'user','content':f"План {p['id']} відхилено кнопкою. Не застосований."})
             st.rerun()
