@@ -126,7 +126,7 @@ with chat_tab:
     st.subheader('Дослідження')
     if st.button('Почати діагностику'):
         st.session_state.diagnosis_started = True
-        talk('Досліди якість таблиці інструментами, перевір можливі проблеми та запитай мене про неоднозначності перед виправленнями.')
+        talk('Досліди якість таблиці інструментами й перевір можливі проблеми. Якщо для наступної дії бракує важливої інформації, постав одне конкретне запитання.')
     for message in st.session_state.chat:
         with st.chat_message(message['role']):
             st.markdown(message['content'])
