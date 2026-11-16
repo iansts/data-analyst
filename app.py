@@ -7,11 +7,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from agent import APPROVE_PLAN_BUTTON, PLAN_TAB, REJECT_PLAN_BUTTON, Agent, ProviderError
+from agent import APPROVE_PLAN_BUTTON, DEFAULT_MODELS, PLAN_TAB, REJECT_PLAN_BUTTON, Agent, ProviderError
 from engine import Clinic, export_csv, export_xlsx, load_table_auto, profile
 
 provider = 'Groq'
-model = 'openai/gpt-oss-120b'
+model = DEFAULT_MODELS[provider]
 
 st.set_page_config(page_title='Data Analyst · агент якості даних', page_icon='🔬', layout='wide')
 st.markdown('''<style>

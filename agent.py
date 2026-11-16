@@ -10,6 +10,7 @@ from engine import profile
 
 PROVIDERS = {'Groq': 'https://api.groq.com/openai/v1', 'Grok (xAI)': 'https://api.x.ai/v1'}
 DEFAULT_MODELS = {'Groq': 'openai/gpt-oss-120b', 'Grok (xAI)': 'grok-4.3'}
+GROQ_FALLBACK_MODELS = ('openai/gpt-oss-20b', 'qwen/qwen3.8-27b')
 PLAN_TAB = 'План виправлень'
 APPROVE_PLAN_BUTTON = 'Підтверджую: застосувати цей план'
 REJECT_PLAN_BUTTON = 'Відхилити план'
@@ -85,6 +86,14 @@ class ProviderError(Exception):
 
 
 class RequestTooLarge(ProviderError):
+    pass
+
+
+class RateLimited(ProviderError):
+    pass
+
+
+class ModelUnavailable(ProviderError):
     pass
 
 
@@ -179,7 +188,7 @@ def rate_limit_details(response, key):
     return explanation, wait, not (quota or daily or oversized)
 
 
-def api_request(provider, key, path, payload=None, on_wait=None):
+def api_request(provider, key, path, payload=None, on_wait=None, *, retry_limits=True):
     if not key.strip():
         raise ProviderError('Введіть API-ключ у бічній панелі.')
     url = PROVIDERS[provider] + path
@@ -197,21 +206,20 @@ def api_request(provider, key, path, payload=None, on_wait=None):
         # Retry the exact failed HTTP request, not the preceding tool executions.
         # Some 429s omit Retry-After. Use bounded backoff rather than failing immediately.
         delay = wait if wait is not None else min(10 * (2 ** attempt), 60)
-        if response.status_code == 429 and transient and delay <= 60 and waited + delay <= 180 and attempt < 4:
+        if retry_limits and response.status_code == 429 and transient and delay <= 60 and waited + delay <= 180 and attempt < 4:
             if on_wait:
                 on_wait(delay)
             time.sleep(delay)
             waited += delay
             continue
         if response.status_code == 413 or 'Один запит перевищує' in explanation:
-            raise RequestTooLarge(explanation)
-        raise ProviderError(explanation)
+            raise RequestTooLarge('Запит завеликий. Скоротіть його або почніть новий діалог.')
+        raise RateLimited('Сервіс аналізу тимчасово перевантажений. Спробуйте пізніше.')
     if response.status_code != 200:
-        messages = {400: 'Модель відхилила запит або виклик інструмента. Спробуйте іншу модель із tool calling.',
-                    401: 'Ключ не прийнято. Перевірте ключ і вибраного провайдера.',
-                    403: 'Для цього ключа немає доступу до моделі.',
-                    404: 'Модель не знайдено. Оновіть список моделей.',
-                    429: 'Провайдер обмежив запити.'}
+        if response.status_code in (403, 404) and path == '/chat/completions':
+            raise ModelUnavailable('Для цього ключа модель недоступна.')
+        messages = {400: 'Не вдалося обробити запит. Спробуйте переформулювати його.',
+                    401: 'Ключ не прийнято. Перевірте ключ у бічній панелі.'}
         raise ProviderError(messages.get(response.status_code, f'Провайдер тимчасово недоступний (HTTP {response.status_code}).'))
     try:
         return response.json()
@@ -222,6 +230,27 @@ def api_request(provider, key, path, payload=None, on_wait=None):
 def list_models(provider, key):
     data = api_request(provider, key, '/models')
     return sorted(m['id'] for m in data.get('data', []) if isinstance(m.get('id'), str))
+
+
+def complete_step(provider, key, models, payload, on_wait):
+    """Retry only the failed completion. Keep the working model for later steps."""
+    while models:
+        request = payload | {'model': models[0]}
+        try:
+            try:
+                data = api_request(provider, key, '/chat/completions', request, on_wait=on_wait,
+                                   retry_limits=len(models) == 1)
+            except RequestTooLarge:
+                request = request | {'messages': shrink_tool_results(request['messages']), 'max_tokens': 1000}
+                data = api_request(provider, key, '/chat/completions', request, on_wait=on_wait,
+                                   retry_limits=len(models) == 1)
+            return data, request['messages']
+        except (RateLimited, RequestTooLarge, ModelUnavailable) as error:
+            if len(models) == 1:
+                if isinstance(error, RequestTooLarge):
+                    raise
+                raise ProviderError('Сервіс аналізу тимчасово недоступний. Спробуйте пізніше.') from None
+            models.pop(0)
 
 
 class Agent:
@@ -236,21 +265,16 @@ class Agent:
         pending_before = copy.deepcopy(clinic.pending)
         messages.append({'role': 'user', 'content': user_text})
         local_trace = []
+        models = [model]
+        if provider == 'Groq' and model == DEFAULT_MODELS['Groq']:
+            models.extend(GROQ_FALLBACK_MODELS)
         try:
             for step in range(9):
                 if len(json.dumps(messages, ensure_ascii=False)) > 140000:
                     raise ProviderError('Історія стала завеликою. Почніть новий діалог кнопкою в бічній панелі; дані збережуться.')
-                payload = {'model': model, 'messages': messages, 'tools': TOOLS,
+                payload = {'messages': messages, 'tools': TOOLS,
                            'tool_choice': 'auto' if step < 8 else 'none', 'max_tokens': 1800}
-                try:
-                    data = api_request(provider, key, '/chat/completions', payload, on_wait=on_wait)
-                except RequestTooLarge:
-                    # A failed HTTP request has not executed any tools. Retry only
-                    # that request with old observations removed, never reapply plans.
-                    messages = shrink_tool_results(messages)
-                    payload['messages'] = messages
-                    payload['max_tokens'] = 1000
-                    data = api_request(provider, key, '/chat/completions', payload, on_wait=on_wait)
+                data, messages = complete_step(provider, key, models, payload, on_wait)
                 self.total_tokens += data.get('usage', {}).get('total_tokens', 0)
                 raw = data['choices'][0]['message']
                 calls = raw.get('tool_calls') or []
