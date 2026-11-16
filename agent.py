@@ -21,7 +21,12 @@ inspect_rows, aggregate. Не вигадуй результати, статис�
 семантика дублів, трактування дат, пропусків, курсів валют та від'ємних чисел.
 Коли є підстави, виклич propose_plan з коротким поясненням та операціями.
 Доступні kind: trim(column), replace(column,mapping), fill_missing(column,value),
-to_number(column,decimal), to_date(column,format), drop_duplicates(subset).
+to_number(column,decimal), to_date(column,format), drop_duplicates(subset),
+drop_rows_where(value, column?). Це видалення рядка за точним збігом значення
+в указаній колонці, або хоча б в одній колонці, якщо column не задано.
+Текст порівнюється з урахуванням регістру та пробілів. Якщо користувач просить
+видалити всі рядки з UNKNOWN у будь-якій колонці, запропонуй операцію
+{"kind":"drop_rows_where","value":"UNKNOWN"}.
 Не вигадуй значення пропусків; погодь спосіб заповнення. Формат дат має бути явним.
 План лише створює preview. Ти НЕ можеш його затвердити. Попроси натиснути кнопку.
 Після повідомлення про затвердження повторно виклич profile_table та перевір
@@ -51,7 +56,7 @@ TOOLS = [
     tool('propose_plan', 'Підготувати копію та preview. НЕ застосовує зміни.',
          {'explanation': STR, 'operations': {'type': 'array', 'minItems': 1, 'maxItems': 15,
           'items': {'type': 'object', 'properties': {
-              'kind': {'type': 'string', 'enum': ['trim','replace','fill_missing','to_number','to_date','drop_duplicates']},
+              'kind': {'type': 'string', 'enum': ['trim','replace','fill_missing','to_number','to_date','drop_duplicates','drop_rows_where']},
               'column': STR, 'mapping': {'type':'object', 'additionalProperties': True},
               'value': {'type': ['string','number','boolean']}, 'decimal': STR, 'format': STR,
               'subset': {'type':'array','items': STR}}, 'required': ['kind'], 'additionalProperties': False}}},

@@ -84,7 +84,7 @@ def transform(source, operations):
     for op in operations:
         kind = op['kind']
         col = op.get('column')
-        if kind != 'drop_duplicates' and col not in df.columns:
+        if kind not in ('drop_duplicates', 'drop_rows_where') and col not in df.columns:
             raise ValueError(f'Невідома колонка: {col}')
         if kind == 'trim':
             df[col] = df[col].map(lambda x: x.strip() if isinstance(x, str) else x)
@@ -117,6 +117,18 @@ def transform(source, operations):
             if (df[col].notna() & converted.isna()).any():
                 raise ValueError(f'{col}: є дати, що не відповідають формату {fmt}.')
             df[col] = converted.dt.strftime('%Y-%m-%d').where(converted.notna(), None)
+        elif kind == 'drop_rows_where':
+            value = op.get('value')
+            if not isinstance(value, (str, int, float, bool)):
+                raise ValueError('Вкажіть текстове, числове або логічне значення для видалення рядків.')
+            if 'column' in op and (not isinstance(col, str) or col not in df.columns):
+                raise ValueError(f'Невідома колонка: {col}')
+            columns = df[[col]] if 'column' in op else df
+            matches = columns.eq(value).fillna(False)
+            if not isinstance(value, str):
+                # Python treats True / False as equal to 1 / 0. Keep them distinct.
+                matches &= columns.map(pd.api.types.is_bool).eq(isinstance(value, bool))
+            df = df.loc[~matches.any(axis=1)]
         elif kind == 'drop_duplicates':
             subset = op.get('subset') or None
             if subset and (not isinstance(subset, list) or any(c not in df.columns for c in subset)):
