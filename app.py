@@ -33,6 +33,7 @@ st.write('Знаходьте помилки в таблицях і виправ�
 def clear_chat():
     st.session_state.agent = Agent()
     st.session_state.chat = []
+    st.session_state.diagnosis_started = False
     if 'clinic' in st.session_state:
         st.session_state.clinic.pending = None
 
@@ -124,13 +125,15 @@ chat_tab, data_tab, plan_tab, log_tab = st.tabs(['Розмова з агенто
 with chat_tab:
     st.subheader('Дослідження')
     if st.button('Почати діагностику'):
+        st.session_state.diagnosis_started = True
         talk('Досліди якість таблиці інструментами, перевір можливі проблеми та запитай мене про неоднозначності перед виправленнями.')
     for message in st.session_state.chat:
         with st.chat_message(message['role']):
             st.markdown(message['content'])
-    prompt = st.chat_input('Поставте задачу або дайте відповідь агенту', max_chars=5000)
-    if prompt:
-        talk(prompt)
+    if st.session_state.get('diagnosis_started', False):
+        prompt = st.chat_input('Поставте задачу або дайте відповідь агенту', max_chars=5000)
+        if prompt:
+            talk(prompt)
 
 with data_tab:
     st.subheader('Поточна таблиця')
