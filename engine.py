@@ -1,4 +1,3 @@
-"""Deterministic tools. The LLM may propose changes, never approve them."""
 from __future__ import annotations
 
 import copy
